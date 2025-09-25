@@ -1,12 +1,13 @@
+import os
 import time
-import requests, re, io, json, smtplib, ast 
+import requests, re, io, json, smtplib, ast
 from PyPDF2 import PdfReader
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from openai import OpenAI
-from gspread_formatting import format_cell_range, CellFormat, TextFormat, Color
+from gspread_formatting import format_cell_range, CellFormat, TextFormat
 from googleapiclient.discovery import build
 from fastapi import FastAPI, Request, BackgroundTasks
 
@@ -15,14 +16,14 @@ app = FastAPI()
 
 # --- DEEPSEEK CLIENT ---
 client = OpenAI(
-    api_key="sk-32faa3252eb14792b99fdb438c724f8f",
+    api_key=os.environ.get("DEEP_SEEK_API_KEY"),
     base_url="https://api.deepseek.com"
 )
-
 # --- PARSE FORM INPUTS ---
-def parse_form_input(data, creds_path="analog-opus-435209-q6-a06efa6f2492.json"):
+def parse_form_input(data):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
+    service_account_info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT"])
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(service_account_info, scope)
     return {
         "folder": data.get("Link to Google Drive Resumes Folder (Make sure it's public)", ""),
         "email": data.get("Email address", ""),
@@ -51,8 +52,9 @@ def extract_text(pdf_bytes):
 
 def get_file_links(folder_url):
     folder_id = extract_folder_id(folder_url)
-    creds = ServiceAccountCredentials.from_json_keyfile_name(
-        "analog-opus-435209-q6-a06efa6f2492.json",
+    service_account_info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT"])
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(
+        service_account_info,
         scopes=["https://www.googleapis.com/auth/drive"]
     )
     service = build("drive", "v3", credentials=creds)
@@ -174,7 +176,7 @@ def format_and_sort_sheet(ws):
 # --- EMAIL NOTIFICATION ---
 def send_email(to_email, sheet_link, expired=[]):
     msg = MIMEMultipart()
-    msg['From'] = "mahmadmahmod87@gmail.com"
+    msg['From'] = os.environ.get("EMAIL_USER")
     msg['To'] = to_email
     msg['Subject'] = "Resume Evaluation Results"
     body = f"Results: {sheet_link}"
@@ -182,8 +184,8 @@ def send_email(to_email, sheet_link, expired=[]):
     msg.attach(MIMEText(body, 'plain'))
     server = smtplib.SMTP('smtp.gmail.com', 587)
     server.starttls()
-    server.login("mahmadmahmod87@gmail.com", "ccdr sgfa oihn iran")
-    server.sendmail("mahmadmahmod87@gmail.com", to_email, msg.as_string())
+    server.login(os.environ.get("EMAIL_USER"), os.environ.get("EMAIL_PASS"))
+    server.sendmail(os.environ.get("EMAIL_USER"), to_email, msg.as_string())
     server.quit()
 
 # --- MAIN WORKFLOW ---
