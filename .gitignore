@@ -1,0 +1,27 @@
+# Python cache / bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environment
+venv/
+.env/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# IDE / editor settings
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+
+# OS-specific
+.DS_Store
+Thumbs.db
