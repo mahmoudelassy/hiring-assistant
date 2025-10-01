@@ -417,6 +417,41 @@ async def send_email_async(to_email: str, sheet_link: str, expired: List[str] = 
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, _send_email)
 
+
+async def send_feedback_email_async(to_email: str):
+    """Send feedback form link after 1 hour"""
+    await asyncio.sleep(3600) 
+
+    def _send_email():
+        try:
+            msg = MIMEMultipart()
+            msg['From'] = os.environ.get("EMAIL_USER")
+            msg['To'] = to_email
+            msg['Subject'] = "We’d love your feedback on the Resume Evaluation Service"
+
+            body = (
+                "Hello,\n\n"
+                "Thank you for using the Resume Evaluation Service! 🙏\n\n"
+                "Your experience matters to us, and we’d love to hear your thoughts.\n\n"
+                "👉 Please share your feedback here: https://forms.gle/xtx5ZAidEKnVMCAT6\n\n"
+                "Best regards,\n"
+                "The Resume Evaluation Team"
+            )
+
+            msg.attach(MIMEText(body, 'plain'))
+
+            with smtplib.SMTP('smtp.gmail.com', 587) as server:
+                server.starttls()
+                server.login(os.environ.get("EMAIL_USER"), os.environ.get("EMAIL_PASS"))
+                server.sendmail(os.environ.get("EMAIL_USER"), to_email, msg.as_string())
+
+            logger.info(f"✅ Feedback email sent to {to_email}")
+        except Exception as e:
+            logger.error(f"Feedback email error: {e}")
+
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _send_email)
+
 # --- MAIN OPTIMIZED WORKFLOW ---
 async def run_optimized(form_data: Dict):
     """Main optimized workflow with async processing"""
@@ -510,6 +545,8 @@ async def run_optimized(form_data: Dict):
         
         processing_time = time.time() - start_time
         logger.info(f"🎯 Processing completed in {processing_time:.2f} seconds")
+
+        asyncio.create_task(send_feedback_email_async(inputs["email"]))
         
     except Exception as e:
         logger.error(f"Fatal error in run_optimized: {e}")
