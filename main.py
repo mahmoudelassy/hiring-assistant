@@ -364,6 +364,52 @@ def create_and_format_sheet(creds, results: List[List[str]]) -> gspread.Spreadsh
         }
     })
     
+    # ===== ADD CONDITIONAL FORMATTING =====
+    # Define tier colors and score ranges
+    tiers = {
+        "Top Candidate": {"color": {"red": 0.6, "green": 1, "blue": 0.6}, "min": 80, "max": 100},
+        "High Potential": {"color": {"red": 0.8, "green": 1, "blue": 0.8}, "min": 60, "max": 79.99},
+        "Consider For Review": {"color": {"red": 1, "green": 1, "blue": 0.6}, "min": 40, "max": 59.99},
+        "Not Ideal Fit": {"color": {"red": 1, "green": 0.9, "blue": 0.5}, "min": 20, "max": 39.99},
+        "Does Not Meet The Criteria": {"color": {"red": 1, "green": 0.8, "blue": 0.8}, "min": 0, "max": 19.99}
+    }
+    
+    # Add conditional formatting for Tier (column K, index 10) and Score (column J, index 9)
+    for idx, (tier, info) in enumerate(tiers.items()):
+        # Format for Tier column (text match)
+        batch_requests.append({
+            "addConditionalFormatRule": {
+                "rule": {
+                    "ranges": [{"sheetId": sheet_id, "startRowIndex": 2, "startColumnIndex": 10, "endColumnIndex": 11}],
+                    "booleanRule": {
+                        "condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": tier}]},
+                        "format": {"backgroundColor": info["color"]}
+                    }
+                },
+                "index": idx
+            }
+        })
+        
+        # Format for Score column (number range)
+        batch_requests.append({
+            "addConditionalFormatRule": {
+                "rule": {
+                    "ranges": [{"sheetId": sheet_id, "startRowIndex": 2, "startColumnIndex": 9, "endColumnIndex": 10}],
+                    "booleanRule": {
+                        "condition": {
+                            "type": "NUMBER_BETWEEN",
+                            "values": [
+                                {"userEnteredValue": str(info["min"])},
+                                {"userEnteredValue": str(info["max"])}
+                            ]
+                        },
+                        "format": {"backgroundColor": info["color"]}
+                    }
+                },
+                "index": idx + 5
+            }
+        })
+    
     # Execute all requests in one batch
     ws.spreadsheet.batch_update({"requests": batch_requests})
     
