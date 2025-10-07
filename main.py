@@ -436,38 +436,47 @@ def create_and_format_sheet(creds, results: List[List[str]]) -> gspread.Spreadsh
 
 # --- OPTIMIZED EMAIL ---
 async def send_email_async(to_email: str, sheet_link: str, expired: List[str] = None):
-    """Async email sending"""
+    """Async email sending with invalid/private link handling"""
     def _send_email():
         try:
             msg = MIMEMultipart()
-            msg['From'] = os.environ.get("EMAIL_USER")
+            msg['From'] = f"Hiring Assistant <{os.environ.get('EMAIL_USER')}>"
             msg['To'] = to_email
-            msg['Subject'] = "Resume Evaluation Results"
-            
-            body = f"Results: {sheet_link}"
-            if expired:
-                body += f"\n\n{len(expired)} files were expired or inaccessible."
-            
+
+            if not sheet_link:  # case when no files were found
+                msg['Subject'] = "❌ Resume Evaluation Failed"
+                body = (
+                    "Hello,\n\n"
+                    "We could not access any resumes from the provided Google Drive link.\n\n"
+                    "Possible reasons:\n"
+                    "• The link is invalid\n"
+                    "• The folder is private (please make sure it is shared with 'Anyone with the link')\n\n"
+                    "Please update the sharing settings and try again.\n\n"
+                    "Regards,\nResume Evaluation Service"
+                )
+            else:
+                msg['Subject'] = "Resume Evaluation Results"
+                body = f"Results: {sheet_link}"
+                if expired:
+                    body += f"\n\n{len(expired)} files were expired or inaccessible."
+
             msg.attach(MIMEText(body, 'plain'))
-            
+
             with smtplib.SMTP('smtp.gmail.com', 587) as server:
                 server.starttls()
                 server.login(os.environ.get("EMAIL_USER"), os.environ.get("EMAIL_PASS"))
                 server.sendmail(os.environ.get("EMAIL_USER"), to_email, msg.as_string())
-            
+
             logger.info(f"Email sent to {to_email}")
         except Exception as e:
             logger.error(f"Email error: {e}")
-    
-    # Run in thread pool to avoid blocking
+
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, _send_email)
 
 
-async def send_feedback_email_async(to_email: str):
-    """Send feedback form link after 1 hour"""
-    await asyncio.sleep(3600) 
 
+async def send_feedback_email_async(to_email: str):
     def _send_email():
         try:
             msg = MIMEMultipart()
@@ -514,6 +523,12 @@ async def run_optimized(form_data: Dict):
         
         if not links:
             logger.warning("No PDF files found")
+            await send_email_async(
+                inputs["email"],
+                sheet_link="",
+                expired=[],
+            )
+                
             return
         
         # Process files in concurrent batches
