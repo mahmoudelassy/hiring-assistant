@@ -436,13 +436,14 @@ def create_and_format_sheet(creds, results: List[List[str]]) -> gspread.Spreadsh
 
 # --- OPTIMIZED EMAIL ---
 async def send_email_async(to_email: str, sheet_link: str, expired: List[str] = None):
-    """Async email sending with invalid/private link handling"""
+    """Async email sending with safe SMTP handling for Railway environments"""
     def _send_email():
         try:
             msg = MIMEMultipart()
             msg['From'] = f"Hiring Assistant <{os.environ.get('EMAIL_USER')}>"
             msg['To'] = to_email
 
+            # Email subject & body
             if not sheet_link:  # case when no files were found
                 msg['Subject'] = "❌ Resume Evaluation Failed"
                 body = (
@@ -462,21 +463,28 @@ async def send_email_async(to_email: str, sheet_link: str, expired: List[str] = 
 
             msg.attach(MIMEText(body, 'plain'))
 
-            with smtplib.SMTP('smtp.gmail.com', 587) as server:
-                server.starttls()
-                server.login(os.environ.get("EMAIL_USER"), os.environ.get("EMAIL_PASS"))
-                server.sendmail(os.environ.get("EMAIL_USER"), to_email, msg.as_string())
+            # --- Safe SMTP block ---
+            try:
+                with smtplib.SMTP('smtp.gmail.com', 587, timeout=10) as server:
+                    server.starttls()
+                    server.login(os.environ.get("EMAIL_USER"), os.environ.get("EMAIL_PASS"))
+                    server.sendmail(os.environ.get("EMAIL_USER"), to_email, msg.as_string())
+                logger.info(f"✅ Email sent successfully to {to_email}")
+            except Exception as e:
+                if "Network is unreachable" in str(e):
+                    logger.warning("⚠️ Railway blocked outbound email. Skipping SMTP send.")
+                else:
+                    logger.error(f"Email send failed: {e}")
 
-            logger.info(f"Email sent to {to_email}")
         except Exception as e:
-            logger.error(f"Email error: {e}")
+            logger.error(f"Email setup error: {e}")
 
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, _send_email)
 
 
-
 async def send_feedback_email_async(to_email: str):
+    """Send feedback request email with same safe SMTP handling"""
     def _send_email():
         try:
             msg = MIMEMultipart()
@@ -495,14 +503,21 @@ async def send_feedback_email_async(to_email: str):
 
             msg.attach(MIMEText(body, 'plain'))
 
-            with smtplib.SMTP('smtp.gmail.com', 587) as server:
-                server.starttls()
-                server.login(os.environ.get("EMAIL_USER"), os.environ.get("EMAIL_PASS"))
-                server.sendmail(os.environ.get("EMAIL_USER"), to_email, msg.as_string())
+            # --- Safe SMTP block ---
+            try:
+                with smtplib.SMTP('smtp.gmail.com', 587, timeout=10) as server:
+                    server.starttls()
+                    server.login(os.environ.get("EMAIL_USER"), os.environ.get("EMAIL_PASS"))
+                    server.sendmail(os.environ.get("EMAIL_USER"), to_email, msg.as_string())
+                logger.info(f"✅ Feedback email sent successfully to {to_email}")
+            except Exception as e:
+                if "Network is unreachable" in str(e):
+                    logger.warning("⚠️ Railway blocked outbound email. Skipping feedback SMTP send.")
+                else:
+                    logger.error(f"Feedback email send failed: {e}")
 
-            logger.info(f"✅ Feedback email sent to {to_email}")
         except Exception as e:
-            logger.error(f"Feedback email error: {e}")
+            logger.error(f"Feedback email setup error: {e}")
 
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, _send_email)
