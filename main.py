@@ -645,12 +645,20 @@ async def run_optimized(form_data: Dict):
         # Parse input 
         inputs = parse_form_input(form_data) 
         user_email = inputs["email"]
-         
-        # Get file links 
-        logger.info("Fetching file links...") 
-        links = await get_file_links_async(inputs["folder"]) 
+        
+        # Check if we have pre-selected links from quota management
+        if '_selected_cv_links' in form_data:
+            links = form_data['_selected_cv_links']
+            original_cv_count = form_data.get('_original_cv_count', len(links))
+            logger.info(f"Using pre-selected {len(links)} CVs out of {original_cv_count} total")
+        else:
+            # Get file links normally
+            logger.info("Fetching file links...") 
+            links = await get_file_links_async(inputs["folder"]) 
+            original_cv_count = len(links)
+        
         cv_count = len(links)
-        logger.info(f"Found {cv_count} PDF files") 
+        logger.info(f"Processing {cv_count} PDF files") 
          
         if not links: 
             logger.warning("No PDF files found") 
@@ -840,31 +848,58 @@ async def process_form(request: Request, background_tasks: BackgroundTasks):
                 "message": "No PDF files found in the provided Google Drive folder."
             }
         
-        # 4. Check remaining requests quota
+        # 4. Check remaining requests quota and handle accordingly
         remaining_requests = int(user.get("remaining requests", 0))
-        logger.info(f"💳 User has {remaining_requests} remaining requests, needs {cv_count}")
+        logger.info(f"💳 User has {remaining_requests} remaining requests, found {cv_count} CVs")
         
+        # If CV count exceeds quota, take first N CVs up to remaining requests
         if cv_count > remaining_requests:
-            return {
-                "status": "error",
-                "message": f"Insufficient quota. You have {remaining_requests} requests remaining, but {cv_count} CVs were found. Please upgrade your plan or reduce the number of CVs.",
-                "remaining_requests": remaining_requests,
-                "cv_count": cv_count
-            }
+            if remaining_requests == 0:
+                return {
+                    "status": "error",
+                    "message": f"You have no remaining requests. Found {cv_count} CVs but your quota is exhausted. Please upgrade your plan.",
+                    "remaining_requests": 0,
+                    "cv_count": cv_count
+                }
+            
+            # Take first N CVs up to remaining quota
+            selected_links = cv_links[:remaining_requests]
+            
+            logger.info(f"⚠️ CV count ({cv_count}) exceeds quota ({remaining_requests}). Selected first {len(selected_links)} CVs")
+            
+            # Update data with selected links
+            data['_selected_cv_links'] = selected_links
+            data['_original_cv_count'] = cv_count
+            
+            actual_cv_count = len(selected_links)
+            
+            # Inform user about the selection
+            selection_message = f"Note: Found {cv_count} CVs but you have only {remaining_requests} requests remaining. Processing first {actual_cv_count} CVs."
+        else:
+            data['_selected_cv_links'] = cv_links
+            data['_original_cv_count'] = cv_count
+            actual_cv_count = cv_count
+            selection_message = None
          
         # 5. All validations passed - start processing
-        logger.info(f"✅ Validation passed. Starting background processing...")
+        logger.info(f"✅ Validation passed. Starting background processing for {actual_cv_count} CVs...")
         background_tasks.add_task(run_optimized, data) 
          
-        return { 
+        response_data = { 
             "status": "processing", 
             "email": user_email, 
             "message": "Resume evaluation started. You will receive an email when complete.", 
-            "cv_count": cv_count,
+            "cv_count": actual_cv_count,
             "remaining_requests_before": remaining_requests,
-            "remaining_requests_after": remaining_requests - cv_count,
+            "remaining_requests_after": remaining_requests - actual_cv_count,
             "estimated_time": "Processing time depends on the number of resumes" 
-        } 
+        }
+        
+        if selection_message:
+            response_data["note"] = selection_message
+            response_data["original_cv_count"] = cv_count
+        
+        return response_data 
          
     except Exception as e: 
         logger.error(f"Endpoint error: {e}") 
@@ -876,7 +911,23 @@ async def process_form(request: Request, background_tasks: BackgroundTasks):
 @app.get("/health") 
 def health_check(): 
     """Health check endpoint""" 
-    return {"status": "healthy", "timestamp": time.time()} 
+    return {"status": "healthy", "timestamp": time.time()}
+
+@app.get("/service-account-email")
+def get_service_account_email():
+    """Get the service account email for sharing spreadsheets"""
+    try:
+        service_account_info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT"])
+        return {
+            "status": "success",
+            "service_account_email": service_account_info.get("client_email"),
+            "message": "Share your Google Sheets with this email address (Editor access)"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        } 
 
 @app.get("/user/{email}")
 async def get_user_info(email: str):
